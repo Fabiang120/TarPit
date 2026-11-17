@@ -62,15 +62,25 @@ int main()
     // Job is to tell which sockets are actively talking to server_fd
     std::vector<struct pollfd> pollfds;
     short revents = 0;
+    // Revents only chane when os alerts
     pollfds.emplace_back(server_fd, POLLIN, revents);
 
     // Holds the file descriptor to guest link
     std::unordered_map<int,guest> guest_cabinet;
-
     // Fourth accept place //
     // Need a while loop that checks priority_queue
+    while (true) {
+        int timeout = -1;
+        // Check if anything has changed with the server or new conn
+        if (pollfds[0].revents & POLLIN == true) {
+            // Accept new conn
+            struct sockaddr_storage client_addr;
+            socklen_t client_len = sizeof(client_addr);
 
-    // First check if server_fd is reading then call accept why do we need to see if the server is reading it always
+            // Puts client info into client addr, and clent_len
+            int client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
+        }
+    }
     // second Register client_fd from accept into pollfds, update priority_queue, upload guests
     //
 

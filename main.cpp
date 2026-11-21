@@ -8,14 +8,15 @@
 #include <unistd.h>
 #include <poll.h>
 #include <queue>
+#include <fcntl.h>
 
+// The objective of this program is to be part of a bigger honeypot on a virtual cloud and waste the resources of attackers
 constexpr int PORT = 2222;
 constexpr int BUFFER_SIZE = 1024;
 using Clock = std::chrono::steady_clock;
-
+// Each connection will be saved as a guest and will have an entry for its time logging
 namespace {
     struct guest {
-        int file_descriptor;
         Clock::time_point last_byte_time;
         std::size_t banner_offset = 0;
     };
@@ -27,15 +28,15 @@ namespace {
         }
     };
 }
-
 int main()
 {
-    // Open a server listening on laptop's ipv6
     int server_fd = socket(AF_INET6, SOCK_STREAM, 0);
     if(server_fd < 0){
         perror("socket failed");
         return 1;
     }
+    // Put server in non block mode so it can read multiple connections
+    fcntl(server_fd, F_SETFL, O_NONBLOCK);
     // Watch port 2222 on ::1
     // First bind socket to ip / port
     sockaddr_in6 hint{};
@@ -53,8 +54,7 @@ int main()
     }
 
     // Third mark socket for listening
-    // For every connection consistently poll for if were are getting input
-
+    // For every connection consistently listen for if were are getting input
     if(listen(server_fd, SOMAXCONN) < 0){
         perror("listen failed");
         close(server_fd);
@@ -66,61 +66,47 @@ int main()
     // Job is to tell which sockets are actively talking to server_fd
     std::vector<struct pollfd> pollfds;
     short revents = 0;
-    // Revents only chane when os alerts
+    // Revents only change when os alerts after poll is used
     pollfds.emplace_back(server_fd, POLLIN, revents);
-
-    // Holds the file descriptor to guest link
     std::unordered_map<int,guest> guest_cabinet;
-    // Fourth accept place //
     // Need a while loop that checks priority_queue
     while (true) {
-        //int timeout = -1;
+        int timeout = -1;
         // Check if anything has changed with the server or new conn
-        if ((pollfds[0].revents & POLLIN) == true) {
+        // poll updates revents
+        poll(pollfds.data(), pollfds.size(), timeout);
+        if ((pollfds[0].revents & POLLIN) != 0) {
             // Accept new conn
-            struct sockaddr_storage client_addr{};
-            socklen_t client_len = sizeof(client_addr);
-            // Puts client info into client addr, and clent_len
-            int client_fd = accept(server_fd, reinterpret_cast<struct sockaddr *>(&client_addr), &client_len);
-            // now you gotta push this to pollfds
-            if(client_fd < 0) {perror("accept failed");}
-            // how to get the size of clock
-            //
-            // second Register client_fd from accept into pollfds, update priority_queue, upload guests
-
-            pollfds.emplace_back(client_fd,POLLIN,revents);
-            using namespace std::chrono_literals;
-            guest client{.file_descriptor = client_fd, .last_byte_time = Clock::now(), .banner_offset = 0};
-            Entry client_pqueue_entry = {.next_send = client.last_byte_time + 10s, .file_descriptor = client.file_descriptor};
-            pq.emplace(client_pqueue_entry);
-            guest_cabinet.emplace(client_fd, client);
-
-            // Once the client is
+            while (true) {
+                struct sockaddr_storage client_addr{};
+                socklen_t client_len = sizeof(client_addr);
+                // Puts client info into client addr, and clent_len
+                int client_fd = accept(server_fd, reinterpret_cast<struct sockaddr *>(&client_addr), &client_len);
+                if (client_fd < 0 ) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        break;
+                    }
+                    perror("accept failed");
+                    break;
+                }
+                pollfds.emplace_back(client_fd,POLLIN,revents);
+                using namespace std::chrono_literals;
+                guest client{.last_byte_time = Clock::now(), .banner_offset = 0};
+                Entry client_pqueue_entry = {.next_send = client.last_byte_time + 10s, .file_descriptor = client_fd};
+                pq.emplace(client_pqueue_entry);
+                guest_cabinet.emplace(client_fd, client);
+                // Loop = has (currentTime- guest.last_sent) = 10 seconds // no do nothing yes proceed
+                // Keep their connection open by slow tcp packets entire while loop
+                // Must have a waiter create a hash map of connection number and timestamp you check every time something happens like a new packet, or wakes up after 1000 millisecond
+                // Use non blocking sockets
+                // Check after if send() returns -1 and errno is not saying try again later
+                // if not -1
+                // Send 1 byte out of vector of ssh
+                // If send() is -1 then close(fd)
+                // Record timestamp, leave socket alone until timer expires
+                // Send byte #2 and continue
+            }
         }
-
     }
-    //
-
-    // If any  tcp packets show up with the SYN flag set
-    // handle handshake and queue them up
-
-    // Take client socket and add to program's internal list of guests
-
-
-    // Loop = has (currentTime- guest.last_sent) = 10 seconds // no do nothing yes proceed
-
-    // Keep their connection open by slow tcp packets entire while loop
-    // Must have a waiter create a hash map of connection number and timestamp you check every time something happens like a new packet, or wakes up after 1000 millisecond
-    // Use non blocking sockets
-
-    // Check after if send() returns -1 and errno is not saying try again later
-    // if not -1 
-    // Send 1 byte out of vector of ssh 
-    // If send() is -1 then close(fd)
-
-    // Record timestamp, leave socket alone until timer expires
-
-    // Send byte #2 and continue
-
     return 0;
 }
